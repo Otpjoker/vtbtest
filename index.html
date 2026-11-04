@@ -1072,6 +1072,18 @@ textarea.gv-in{min-height:80px;padding:12px}
             .dashboard-item-actions .btn { flex: 1 1 120px; }
         }
             @media (min-width: 601px) and (max-width: 768px) { h1 { margin: -10px -10px 22px; padding: 30px 24px 26px; } }
+            .trk-ok { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 7; min-height: 52px; padding: 0 26px; border: 0; border-radius: 999px; background: #1E8E4E; color: #fff; font-weight: 700; font-size: 1.05rem; white-space: nowrap; box-shadow: 0 8px 22px rgba(0,0,0,.35); }
+        .trk-ok:active { transform: translateX(-50%) scale(.96); }
+            /* ===== Plan redimensionnable dans la visite guidée ===== */
+        #gvFootGrip { height: 26px; display: flex; align-items: center; justify-content: center; cursor: ns-resize; touch-action: none; flex-shrink: 0; -webkit-tap-highlight-color: transparent; }
+        #gvFootGrip::before { content: ""; width: 64px; height: 6px; border-radius: 99px; background: #7B8A99; transition: background .2s, width .2s; }
+        #gvFootGrip:hover::before, #gvFootGrip.drag::before, #gvFootGrip:focus-visible::before { background: var(--accent-color); width: 84px; }
+        #gvFoot:not(.edit) { max-height: none; }
+        #gvFoot:not(.edit) #planCanvas { height: var(--gvPlanH, 28vh) !important; }
+        #gvFoot.edit #gvFootGrip { display: none; }
+            .pz-ui { position: absolute; right: 8px; bottom: 8px; z-index: 6; display: flex; flex-direction: column; gap: 6px; }
+        .pz-ui button { width: 44px; height: 44px; border-radius: 12px; border: 1.5px solid #7B8A99; background: rgba(255,255,255,.95); color: var(--primary-color); font-size: 1.25rem; font-weight: 700; box-shadow: 0 3px 10px rgba(0,0,0,.18); }
+        .pz-ui button:active { transform: scale(.94); background: var(--accent-soft); }
     </style>
 <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" href="assets/icon-192.png">
@@ -1295,7 +1307,7 @@ textarea.gv-in{min-height:80px;padding:12px}
                     <span style="flex:1"></span>
                     <button type="button" class="btn" style="padding:8px 12px; background:var(--secondary-color); color:var(--surface);" onclick="planZoom(1.25)" aria-label="Zoom avant">&#128269;+</button>
                     <button type="button" class="btn" style="padding:8px 12px; background:var(--secondary-color); color:var(--surface);" onclick="planZoom(0.8)" aria-label="Zoom arrière">&#128269;-</button>
-                    <button type="button" class="btn" style="padding:8px 12px; background:var(--secondary-color); color:var(--surface);" onclick="planResetView()">&#8635; Vue</button>
+                    <button type="button" class="btn" style="padding:8px 12px; background:var(--secondary-color); color:var(--surface);" onclick="window.__planKeep = null; planResetView()">&#8635; Vue</button>
                 </div>
                 <div class="plan-row-colors" style="display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap;">
                     <span style="font-weight:bold; font-size:0.9rem;">Couleur :</span>
@@ -1364,7 +1376,7 @@ textarea.gv-in{min-height:80px;padding:12px}
         <div id="gvOverlay" role="dialog" aria-modal="true" aria-label="Visite guidée" aria-live="polite">
             <div id="gvBar"><div id="gvCrumb"></div><div id="gvStat"></div><button type="button" id="gvTools" onclick="vtbTools.open()" aria-label="Boîte à outils" title="Boîte à outils">🧰</button><button type="button" id="gvQuit" onclick="gv.quit()">✕ Quitter</button></div>
             <div id="gvBody"></div>
-            <div id="gvFoot"><div id="gvFootBar"><b id="gvFootTitle">&#128506; Plans <small style="font-weight:400">(touchez le plan pour modifier)</small></b><button type="button" id="gvPlansBtn" onclick="gv.plansEdit()">&#9998; Modifier</button></div><div id="gvFootHost"></div></div>
+            <div id="gvFoot"><div id="gvFootGrip" role="separator" aria-orientation="horizontal" aria-valuemin="14" aria-valuemax="72" aria-valuenow="28" aria-valuetext="28 % de la hauteur de l'écran" aria-label="Agrandir ou réduire le plan (glisser, ou toucher pour changer de taille)" tabindex="0" title="Glisser pour agrandir le plan"></div><div id="gvFootBar"><b id="gvFootTitle">&#128506; Plans <small style="font-weight:400">(touchez le plan pour modifier)</small></b><button type="button" id="gvPlansBtn" onclick="gv.plansEdit()">&#9998; Modifier</button></div><div id="gvFootHost"></div></div>
 
             <div id="gvSnack"><span id="gvSnackMsg"></span><button type="button" onclick="gv.undo()">Annuler</button></div>
         </div>
@@ -2068,6 +2080,39 @@ textarea.gv-in{min-height:80px;padding:12px}
             function close() { if (panelStop) { panelStop(); panelStop = null; } const sh = $('vtbToolsSheet'); if (sh) sh.remove(); }
             return { open, close };
         })();
+
+        // --- Plan redimensionnable (visite guidée) : glisser la poignée, toucher pour changer de taille ---
+        function vtbPlanGripInit() {
+            const grip = document.getElementById('gvFootGrip'), foot = document.getElementById('gvFoot'); if (!grip || !foot) return;
+            const KEY = 'vtb_plan_h', PRESETS = [0.28, 0.45, 0.62];
+            const clamp = f => { const ov = document.getElementById('gvOverlay'), cv = document.getElementById('planCanvas'), H = window.innerHeight, over = (foot.offsetHeight && cv && cv.offsetHeight) ? foot.offsetHeight - cv.offsetHeight : 200, maxPx = Math.min(0.72 * H, (ov ? ov.clientHeight : H) - over - 150); return Math.min(Math.max(f, 0.14), Math.max(0.2, maxPx / H)); };
+            let frac = 0.28; try { const v = parseFloat(localStorage.getItem(KEY)); if (v > 0) frac = v; } catch (e) { /* défaut */ }
+            let raf = 0;
+            const apply = (f, keep) => {
+                frac = clamp(f); foot.style.setProperty('--gvPlanH', Math.round(frac * window.innerHeight) + 'px'); grip.setAttribute('aria-valuenow', Math.round(frac * 100)); grip.setAttribute('aria-valuetext', Math.round(frac * 100) + ' % de la hauteur de l\'écran');
+                cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { if (keep) window.__planKeep = Object.assign({}, keep, { t: Date.now() }); try { planResetView(); } catch (e) { /* plan non chargé */ } });
+            };
+            const save = () => { try { localStorage.setItem(KEY, String(frac.toFixed(3))); } catch (e) { /* non mémorisé */ } };
+            foot.style.setProperty('--gvPlanH', Math.round(clamp(frac) * window.innerHeight) + 'px'); grip.setAttribute('aria-valuenow', Math.round(clamp(frac) * 100));
+            let d = null;
+            grip.addEventListener('pointerdown', e => { d = { y: e.clientY, f: frac, keep: planViewSnapshot(), moved: false }; grip.classList.add('drag'); grip.setPointerCapture(e.pointerId); });
+            grip.addEventListener('pointermove', e => {
+                if (!d) return; const dy = d.y - e.clientY; if (Math.abs(dy) > 6) d.moved = true;
+                if (d.moved) apply(d.f + dy / window.innerHeight, d.keep);
+            });
+            const end = () => {
+                if (!d) return; grip.classList.remove('drag');
+                if (!d.moved) { const k = PRESETS.findIndex(x => Math.abs(x - frac) < 0.05); apply(PRESETS[(k + 1) % PRESETS.length], planViewSnapshot()); } // simple toucher : taille suivante
+                save(); d = null;
+            };
+            grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+            grip.addEventListener('keydown', e => {
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); apply(frac + (e.key === 'ArrowUp' ? 0.04 : -0.04), planViewSnapshot()); save(); }
+                else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const k = PRESETS.findIndex(x => Math.abs(x - frac) < 0.05); apply(PRESETS[(k + 1) % PRESETS.length], planViewSnapshot()); save(); }
+            });
+            window.addEventListener('resize', () => apply(frac, planViewSnapshot()));
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', vtbPlanGripInit); else vtbPlanGripInit();
 
         function showToast(msg, type) {
             const toast = document.getElementById("toast");
@@ -3443,6 +3488,7 @@ textarea.gv-in{min-height:80px;padding:12px}
 
         // --- Gestion des plans (liste, import, suppression) ---
         function renderPlansUI() {
+            if (!window.__planKeep) window.__planKeep = planViewSnapshot();
             const sel = document.getElementById('planSelect');
             const toolbar = document.getElementById('planToolbar');
             const emptyMsg = document.getElementById('planEmptyMsg');
@@ -3581,6 +3627,7 @@ textarea.gv-in{min-height:80px;padding:12px}
             planCanvas.addEventListener('pointermove', onPlanPointerMove);
             planCanvas.addEventListener('pointerup', onPlanPointerUp);
             planCanvas.addEventListener('pointercancel', onPlanPointerUp);
+            planCanvas.addEventListener('lostpointercapture', e => { planPointers.delete(e.pointerId); if (planPointers.size < 2) { planPinchStartDist = null; planPinch = null; } });
             planCanvas.addEventListener('wheel', onPlanWheel, { passive: false });
             const widthRange = document.getElementById('planWidthRange');
             if (widthRange) widthRange.addEventListener('input', () => redrawPlan());
@@ -3605,6 +3652,12 @@ textarea.gv-in{min-height:80px;padding:12px}
             planImageEl.src = plan.image;
         }
 
+        function planViewSnapshot() { // mémorise la zone affichée (centre + zoom relatif) pour la retrouver après un ré-affichage
+            if (!planCanvas || !planImageEl || !planImageEl.naturalWidth || !planView.scale) return null;
+            const cw = planCanvas.width / planDpr(), ch = planCanvas.height / planDpr();
+            const fit = Math.min(cw / planImageEl.naturalWidth, ch / planImageEl.naturalHeight) * 0.95;
+            return { id: currentPlanIndex, t: Date.now(), cx: (cw / 2 - planView.offsetX) / planView.scale, cy: (ch / 2 - planView.offsetY) / planView.scale, z: planView.scale / fit };
+        }
         function planResetView() {
             resizePlanCanvasToContainer();
             if (planImageEl && planImageEl.naturalWidth) {
@@ -3615,6 +3668,11 @@ textarea.gv-in{min-height:80px;padding:12px}
                 planView.offsetX = (cw - planImageEl.naturalWidth * planView.scale) / 2;
                 planView.offsetY = (ch - planImageEl.naturalHeight * planView.scale) / 2;
                 planMinScale = planView.scale * 0.5; planMaxScale = Math.max(6, planView.scale * 12);
+                const kp = window.__planKeep; window.__planKeep = null;
+                if (kp && kp.id === currentPlanIndex && Date.now() - kp.t < 2500) { // même plan, ré-affiché : on garde la zone et le niveau de zoom
+                    const fit0 = planView.scale; planView.scale = Math.min(planMaxScale, Math.max(planMinScale, fit0 * kp.z));
+                    planView.offsetX = cw / 2 - kp.cx * planView.scale; planView.offsetY = ch / 2 - kp.cy * planView.scale;
+                }
             } else {
                 planView = { scale: 1, offsetX: 0, offsetY: 0 };
             }
@@ -3684,6 +3742,7 @@ textarea.gv-in{min-height:80px;padding:12px}
         }
 
         async function onPlanPointerDown(e) {
+            if (e.isPrimary) { planPointers.clear(); planPinchStartDist = null; planPinch = null; } // un 1er doigt = plus aucun autre doigt actif (évite un « pincement » fantôme qui bloque zoom et déplacement)
             planCanvas.setPointerCapture(e.pointerId);
             const rect = planCanvas.getBoundingClientRect();
             const px = e.clientX - rect.left, py = e.clientY - rect.top;
@@ -3841,17 +3900,32 @@ textarea.gv-in{min-height:80px;padding:12px}
         // posé sur le plan. Aucune géolocalisation. Précision limitée en intérieur (boussole perturbée, dérive) :
         // le halo grandit avec la distance parcourue et on peut recaler à tout moment (🎯).
         // Échelle du plan : plan.mpp = mètres par pixel de l'image (réglée une fois via 📏, enregistrée avec le plan).
-        const TRK_STEP_M = 0.65, TRK_TH = 1.1;
+        let TRK_STEP_M = 0.65; const TRK_TH = 1.1;
+        try { const sv = parseFloat(localStorage.getItem('vtb_step_m')); if (sv >= 0.45 && sv <= 1.0) TRK_STEP_M = sv; } catch (e) { /* valeur par défaut */ }
+        // Auto-étalonnage : à chaque recalage, la distance réellement parcourue (touchée sur le plan) corrige la longueur du pas.
+        function trkLearnStride(x, y, plan) {
+            if (!trk.seg0 || !plan.mpp || (trk.n || 0) < 8) return '';
+            const est = Math.hypot(trk.x - trk.seg0.x, trk.y - trk.seg0.y) * plan.mpp, act = Math.hypot(x - trk.seg0.x, y - trk.seg0.y) * plan.mpp;
+            if (est < 6) return '';
+            const ratio = Math.min(1.6, Math.max(0.6, act / est));
+            const next = Math.min(1.0, Math.max(0.45, TRK_STEP_M * (1 + 0.5 * (ratio - 1))));
+            if (Math.abs(next - TRK_STEP_M) < 0.01) return '';
+            TRK_STEP_M = next; try { localStorage.setItem('vtb_step_m', next.toFixed(3)); } catch (e) { /* non mémorisé */ }
+            return ' Pas ajusté : ' + next.toFixed(2).replace('.', ',') + ' m.';
+        }
         const trk = { phase: 'off', planId: null, x: 0, y: 0, phi: 0, H: null, hs: null, dist: 0, g: 9.81, d: 0, armed: false, lastStep: 0, steps: [], p1: null, p2: null, sens: false, prevOn: false, raf: 0, wl: null };
 
-        function trkCompass(alpha, beta, gamma) { // cap (0 = nord, sens horaire) vers lequel pointe le DOS du téléphone
-            if (Math.abs(beta || 0) < 30) return (360 - alpha) % 360; // téléphone presque à plat : cap du haut de l'écran
-            const x = (beta || 0) * Math.PI / 180, y = (gamma || 0) * Math.PI / 180, z = alpha * Math.PI / 180;
-            const cY = Math.cos(y), cZ = Math.cos(z), sX = Math.sin(x), sY = Math.sin(y), sZ = Math.sin(z);
-            const Vx = -cZ * sY - sZ * sX * cY, Vy = -sZ * sY + cZ * sX * cY;
-            let h = Math.atan(Vx / Vy);
-            if (Vy < 0) h += Math.PI; else if (Vx < 0) h += 2 * Math.PI;
-            return h * 180 / Math.PI;
+        function trkCompass(alpha, beta, gamma) { // cap (0 = nord, sens horaire) de la direction de marche
+            const r = Math.PI / 180, bt = beta || 0, a = alpha * r, b = bt * r, g = (gamma || 0) * r;
+            const sa = Math.sin(a), ca = Math.cos(a), sb = Math.sin(b), cb = Math.cos(b), sg = Math.sin(g), cg = Math.cos(g);
+            const tE = -cb * sa, tN = ca * cb;                                       // haut de l'écran, projeté à l'horizontale
+            const bE = -(ca * sg + cg * sa * sb), bN = -(sa * sg - ca * cg * sb);    // dos du téléphone, projeté à l'horizontale
+            const t = Math.hypot(tE, tN), k = Math.hypot(bE, bN);
+            const x = Math.min(1, Math.max(0, (bt - 25) / 30)), w = x * x * (3 - 2 * x); // 0 à plat, 1 vers la verticale : pas de bascule brutale
+            const ux = (t > 0.05 ? (1 - w) * tE / t : 0) + (k > 0.05 ? w * bE / k : 0);
+            const uy = (t > 0.05 ? (1 - w) * tN / t : 0) + (k > 0.05 ? w * bN / k : 0);
+            if (!ux && !uy) return (360 - alpha) % 360;
+            return (Math.atan2(ux, uy) * 180 / Math.PI + 360) % 360;
         }
         function trkOnOri(e) {
             let H = null;
@@ -3868,18 +3942,23 @@ textarea.gv-in{min-height:80px;padding:12px}
             const m = Math.hypot(a.x, a.y, a.z);
             trk.g += 0.03 * (m - trk.g);                 // estimation lente de la pesanteur
             trk.d = 0.55 * trk.d + 0.45 * (m - trk.g);   // accélération « dynamique » lissée
+            const rr = e.rotationRate; if (rr && rr.alpha != null) trk.rot = Math.max(Math.hypot(rr.alpha, rr.beta, rr.gamma), 0.85 * (trk.rot || 0)); // vitesse de rotation (°/s) : montée immédiate, retombée lente
             const now = performance.now();
-            if (!trk.armed && trk.d > TRK_TH && now - trk.lastStep > 320) { trk.armed = true; trk.lastStep = now; trkStep(now); }
+            if (!trk.armed && (trk.rot || 0) < 160 && trk.d > TRK_TH && now - trk.lastStep > 320) { trk.armed = true; trk.lastStep = now; trkStep(now); } // pas de pas « fantômes » pendant un demi-tour (rotation > 160 °/s)
             else if (trk.armed && trk.d < TRK_TH * 0.3) trk.armed = false;
         }
         function trkStep(now) {
             if (trk.phase !== 'on') return;
+            const fresh = !trk.lastStepAt || now - trk.lastStepAt > 1600; trk.lastStepAt = now;
             trk.steps = trk.steps.filter(t => now - t < 1600); trk.steps.push(now);
+            trk.burst = fresh ? 1 : (trk.burst || 0) + 1;
             if (trk.steps.length < 2) return; // il faut une marche régulière (évite de bouger quand on manipule le téléphone)
+            if (trk.burst < 3) return;        // après un arrêt : le cap met ~1 s à se stabiliser, on attend le 3e pas
+            const k = trk.burst === 3 ? 2 : 1; // au 3e pas on pose les 2 pas retenus, avec le cap désormais stable
             const plan = plansData[currentPlanIndex];
             if (!plan || plan.id !== trk.planId || !plan.mpp || trk.H == null) return;
-            const A = (trk.H - 90 + trk.phi) * Math.PI / 180, L = TRK_STEP_M / plan.mpp;
-            trk.x += Math.cos(A) * L; trk.y += Math.sin(A) * L; trk.dist += TRK_STEP_M;
+            const A = (trk.H - 90 + trk.phi) * Math.PI / 180, L = k * TRK_STEP_M / plan.mpp;
+            trk.x += Math.cos(A) * L; trk.y += Math.sin(A) * L; trk.dist += k * TRK_STEP_M; trk.n = (trk.n || 0) + k;
             if (planImageEl && planImageEl.naturalWidth) { trk.x = Math.min(planImageEl.naturalWidth, Math.max(0, trk.x)); trk.y = Math.min(planImageEl.naturalHeight, Math.max(0, trk.y)); }
             trkFollow(); trkRedrawSoon(); trkRefreshUI();
         }
@@ -3911,7 +3990,7 @@ textarea.gv-in{min-height:80px;padding:12px}
             window.removeEventListener('deviceorientation', trkOnOri, true);
             window.removeEventListener('devicemotion', trkOnMotion, true);
             try { if (trk.wl) trk.wl.release(); } catch (err) { /* ignoré */ }
-            trkCollapse(); trk.wl = null; trk.sens = false; trk.phase = 'off'; trk.prevOn = false; trk.p1 = trk.p2 = null;
+            trk.pend = null; trkCollapse(); trk.wl = null; trk.sens = false; trk.phase = 'off'; trk.prevOn = false; trk.p1 = trk.p2 = null;
             if (planTool === 'trk') setPlanTool('pan');
             trkRefreshUI(); if (typeof redrawPlan === 'function') redrawPlan();
         }
@@ -3924,9 +4003,9 @@ textarea.gv-in{min-height:80px;padding:12px}
             const f = document.getElementById('gvFoot');
             if (f && f.classList.contains('edit') && typeof gv !== 'undefined' && gv.plansEdit) gv.plansEdit();
         }
-        function trkBeginScale() { trkExpand(); trk.phase = 'scale1'; trk.p1 = trk.p2 = null; setPlanTool('trk'); trkRefreshUI(); redrawPlan(); }
-        function trkBeginPos(keep) { trk.keepDir = keep === true && trk.phase === 'on' && trk.H != null; trk.prevOn = trk.phase === 'on'; trkExpand(); trk.phase = 'pos'; setPlanTool('trk'); trkRefreshUI(); }
-        function trkCancelStep() { trk.keepDir = false; trk.presetM = null; trkCollapse(); trk.phase = (trk.prevOn && trk.sens) ? 'on' : 'off'; trk.p1 = trk.p2 = null; trk.prevOn = false; setPlanTool('pan'); trkRefreshUI(); redrawPlan(); }
+        function trkBeginScale() { trk.pend = null; trkExpand(); trk.phase = 'scale1'; trk.p1 = trk.p2 = null; setPlanTool('trk'); trkRefreshUI(); redrawPlan(); }
+        function trkBeginPos(keep) { trk.pend = null; trk.keepDir = keep === true && trk.phase === 'on' && trk.H != null; trk.prevOn = trk.phase === 'on'; trkExpand(); trk.phase = 'pos'; setPlanTool('trk'); trkRefreshUI(); }
+        function trkCancelStep() { trk.pend = null; trk.keepDir = false; trk.presetM = null; trkCollapse(); trk.phase = (trk.prevOn && trk.sens) ? 'on' : 'off'; trk.p1 = trk.p2 = null; trk.prevOn = false; setPlanTool('pan'); trkRefreshUI(); redrawPlan(); }
         async function trkMain() {
             if (['scale1', 'scale2', 'pos', 'dir'].includes(trk.phase)) { trkCancelStep(); return; }
             const plan = plansData[currentPlanIndex];
@@ -3982,7 +4061,13 @@ textarea.gv-in{min-height:80px;padding:12px}
             trk.p1 = trk.p2 = null; trk.phase = (trk.prevOn && trk.sens) ? 'on' : 'off'; trk.prevOn = false;
             trkCollapse(); setPlanTool('pan'); trkRefreshUI(); redrawPlan();
         }
-        function trkTap(x, y) {
+        function trkTap(x, y) { // 1er temps : on pose (ou on déplace) un réticule ; rien n'est validé tant qu'on n'a pas touché « Valider »
+            if (['scale1', 'scale2', 'pos', 'dir'].includes(trk.phase)) { trk.pend = { x, y }; trkRefreshUI(); redrawPlan(); return; }
+            trkCommit(x, y);
+        }
+        function trkOk() { if (trk.pend) { const q = trk.pend; trkCommit(q.x, q.y); } }
+        function trkCommit(x, y) {
+            trk.pend = null;
             const plan = plansData[currentPlanIndex]; if (!plan) return;
             if (trk.phase === 'scale1') { trk.p1 = { x, y }; trk.phase = 'scale2'; }
             else if (trk.phase === 'scale2') {
@@ -3991,8 +4076,9 @@ textarea.gv-in{min-height:80px;padding:12px}
                 trk.p2 = { x, y }; trk.phase = 'scale3'; redrawPlan(); trkRefreshUI(); trkAskScale(plan, px); return;
             }
             else if (trk.phase === 'pos') {
-                trk.x = x; trk.y = y; trk.dist = 0; trk.planId = plan.id;
-                if (trk.keepDir) { trk.phase = 'on'; trk.prevOn = false; trk.keepDir = false; trk.steps = []; setPlanTool('pan'); showToast('Position recalée.'); trkCollapse(); }
+                const learned = trk.keepDir ? trkLearnStride(x, y, plan) : '';
+                trk.x = x; trk.y = y; trk.dist = 0; trk.planId = plan.id; trk.seg0 = { x, y }; trk.n = 0;
+                if (trk.keepDir) { trk.phase = 'on'; trk.prevOn = false; trk.keepDir = false; trk.steps = []; setPlanTool('pan'); showToast('Position recalée.' + learned); trkCollapse(); }
                 else trk.phase = 'dir';
             }
             else if (trk.phase === 'dir') {
@@ -4000,11 +4086,19 @@ textarea.gv-in{min-height:80px;padding:12px}
                 if (Math.hypot(x - trk.x, y - trk.y) < 6) { showToast('Touchez un point plus loin, devant vous.', 'error'); return; }
                 const A = Math.atan2(y - trk.y, x - trk.x) * 180 / Math.PI;
                 trk.phi = A - (trk.H - 90); trk.phase = 'on'; trk.prevOn = false; trk.steps = [];
-                setPlanTool('pan'); showToast('Suivi actif : marchez, le bonhomme vous suit.'); trkCollapse();
+                trk.seg0 = { x: trk.x, y: trk.y }; trk.n = 0; setPlanTool('pan'); showToast('Suivi actif : marchez, le bonhomme vous suit.'); trkCollapse();
             }
             trkRefreshUI(); redrawPlan();
         }
         function trkDraw(ctx, sc, plan) {
+            if (trk.pend && ['scale1', 'scale2', 'pos', 'dir'].includes(trk.phase)) { // réticule du point en attente de validation
+                const q = trk.pend; ctx.save(); ctx.lineCap = 'round';
+                if (trk.phase === 'dir' && trk.x != null) { ctx.setLineDash([8 / sc, 6 / sc]); ctx.strokeStyle = '#2B47D0'; ctx.lineWidth = 3 / sc; ctx.beginPath(); ctx.moveTo(trk.x, trk.y); ctx.lineTo(q.x, q.y); ctx.stroke(); ctx.setLineDash([]); }
+                [['#fff', 6], ['#E5182E', 2.5]].forEach(([c, w]) => { ctx.strokeStyle = c; ctx.lineWidth = w / sc;
+                    ctx.beginPath(); ctx.arc(q.x, q.y, 14 / sc, 0, Math.PI * 2); ctx.moveTo(q.x - 26 / sc, q.y); ctx.lineTo(q.x - 6 / sc, q.y); ctx.moveTo(q.x + 6 / sc, q.y); ctx.lineTo(q.x + 26 / sc, q.y);
+                    ctx.moveTo(q.x, q.y - 26 / sc); ctx.lineTo(q.x, q.y - 6 / sc); ctx.moveTo(q.x, q.y + 6 / sc); ctx.lineTo(q.x, q.y + 26 / sc); ctx.stroke(); });
+                ctx.restore();
+            }
             if (plan && plan.mpp && planCanvas) { // règle : permet de vérifier l'échelle d'un coup d'œil
                 const ch = planCanvas.height / planDpr(); let L = 1;
                 for (const n of [1, 2, 5, 10, 20, 50, 100]) if (n / plan.mpp * sc <= 130) L = n;
@@ -4065,6 +4159,16 @@ textarea.gv-in{min-height:80px;padding:12px}
             capBtn.title = 'Recaler aussi le cap'; capBtn.setAttribute('aria-label', 'Recaler aussi le cap');
             capBtn.addEventListener('click', () => { if (trk.phase === 'on') trkBeginPos(false); });
             ui.insertBefore(capBtn, ui.querySelector('#trkBtnStop'));
+            const pz = document.createElement('div'); pz.className = 'pz-ui';
+            pz.innerHTML = '<button type="button" aria-label="Zoom avant">＋</button><button type="button" aria-label="Zoom arrière">－</button><button type="button" aria-label="Vue d\'ensemble du plan" title="Vue d\'ensemble">⤢</button>';
+            ['pointerdown', 'pointerup', 'pointermove', 'click'].forEach(ev => pz.addEventListener(ev, e => e.stopPropagation()));
+            const [zi, zo, zf] = pz.querySelectorAll('button');
+            zi.onclick = () => planZoom(1.4); zo.onclick = () => planZoom(0.7); zf.onclick = () => { window.__planKeep = null; planResetView(); };
+            wrap.appendChild(pz);
+            const okBtn = document.createElement('button'); okBtn.type = 'button'; okBtn.className = 'trk-ok'; okBtn.id = 'trkBtnOk'; okBtn.textContent = '✓ Valider ce point'; okBtn.style.display = 'none';
+            ['pointerdown', 'pointerup', 'pointermove'].forEach(ev => okBtn.addEventListener(ev, e => e.stopPropagation()));
+            okBtn.addEventListener('click', e => { e.stopPropagation(); trkOk(); });
+            wrap.appendChild(okBtn);
             ui.querySelector('#trkBtnMain').addEventListener('click', trkMain);
             ui.querySelector('#trkBtnStop').addEventListener('click', trkStop);
             ui.querySelector('#trkBtnScale').addEventListener('click', trkScaleBtn);
@@ -4077,14 +4181,16 @@ textarea.gv-in{min-height:80px;padding:12px}
             main.classList.toggle('on', trk.phase === 'on');
             document.getElementById('trkBtnStop').style.display = trk.sens ? '' : 'none';
             const cb = document.getElementById('trkBtnDir'); if (cb) cb.style.display = trk.phase === 'on' ? '' : 'none';
+            const okb = document.getElementById('trkBtnOk'); if (okb) okb.style.display = (trk.pend && waiting) ? '' : 'none';
             const plan = plansData[currentPlanIndex], sc = document.getElementById('trkBtnScale');
             sc.classList.toggle('on', !!(plan && plan.mpp));
+            const PENDMSG = '📍 Point posé : retouchez pour l\'ajuster (zoomez si besoin), puis ✓ Valider.';
             const T = {
-                scale1: trk.presetM ? '🚪 Touchez un côté de la porte (largeur standard 0,90 m).' : "📏 Échelle : touchez un 1er point dont vous connaissez la distance (ex. bout d'un couloir).",
-                scale2: trk.presetM ? '🚪 Touchez l\'autre côté de la porte.' : '📏 Touchez le 2e point.',
+                scale1: trk.pend ? PENDMSG : trk.presetM ? '🚪 Touchez un côté de la porte (largeur standard 0,90 m).' : "📏 Échelle : touchez un 1er point dont vous connaissez la distance (ex. bout d'un couloir).",
+                scale2: trk.pend ? PENDMSG : trk.presetM ? '🚪 Touchez l\'autre côté de la porte.' : '📏 Touchez le 2e point.',
                 scale3: '📏 Saisissez la distance réelle…',
-                pos: trk.keepDir ? '🎯 Touchez l\'endroit où vous êtes (le cap est conservé).' : '🧍 Touchez l\'endroit où vous êtes.',
-                dir: '🧭 Touchez un point DEVANT vous, dans le sens où vous allez marcher (téléphone tenu devant vous).',
+                pos: trk.pend ? PENDMSG : trk.keepDir ? '🎯 Touchez l\'endroit où vous êtes (le cap est conservé).' : '🧍 Touchez l\'endroit où vous êtes.',
+                dir: trk.pend ? PENDMSG : '🧭 Touchez un point DEVANT vous, dans le sens où vous allez marcher (téléphone tenu devant vous).',
                 on: 'Suivi actif · imprécision ≈ ' + Math.max(1, Math.round(0.08 * trk.dist)) + ' m · 🎯 pour recaler.'
             };
             const hint = document.getElementById('trkHint');
@@ -6023,6 +6129,7 @@ const gv = (function () {
 
     return {
         plansEdit() {
+            window.__planKeep = planViewSnapshot();
             const f = $('gvFoot'), edit = f.classList.toggle('edit');
             plansBtn();
             if (!edit) { saveDataDebounced(true); if (typeof setPlanTool === 'function') setPlanTool('pan'); }
