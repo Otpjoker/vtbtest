@@ -1296,6 +1296,7 @@ textarea.gv-in{min-height:80px;padding:12px}
                 <div class="plan-row-tools" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
                     <button type="button" class="plan-tool-btn active" data-tool="pan" onclick="setPlanTool('pan')" title="Déplacer" aria-label="Déplacer">&#9995;</button>
                     <button type="button" class="plan-tool-btn" data-tool="marker" onclick="setPlanTool('marker')" title="Marqueur" aria-label="Marqueur">&#128205;</button>
+                    <button type="button" class="plan-tool-btn" data-tool="room" onclick="startRoomMarker()" title="Identifier un local" aria-label="Identifier un local">🚪 Local</button>
                     <button type="button" class="plan-tool-btn" data-tool="line" onclick="setPlanTool('line')" title="Ligne" aria-label="Ligne">&#10133;</button>
                     <button type="button" class="plan-tool-btn" data-tool="rect" onclick="setPlanTool('rect')" title="Rectangle" aria-label="Rectangle">&#9645;</button>
                     <button type="button" class="plan-tool-btn" data-tool="circle" onclick="setPlanTool('circle')" title="Cercle" aria-label="Cercle">&#9711;</button>
@@ -3453,6 +3454,7 @@ textarea.gv-in{min-height:80px;padding:12px}
 
         let currentPlanIndex = -1;
         let planTool = 'pan';
+        let pendingRoomMarkerId = null;
         let planColor = '#FB394A';
         let planView = { scale: 1, offsetX: 0, offsetY: 0 };
         let planCanvas = null, planCtx = null, planImageEl = null;
@@ -3770,7 +3772,7 @@ textarea.gv-in{min-height:80px;padding:12px}
             if (planTool === 'pan') { planDragStart = { px, py, ox: planView.offsetX, oy: planView.offsetY }; return; }
             // Marqueur / texte / suppression : l'action part au RELÂCHEMENT d'un simple toucher (pas d'un glissement
             // ni d'un pincement) ; un glissement à un doigt déplace le plan.
-            if (['delete', 'marker', 'text', 'trk'].includes(planTool)) {
+            if (['delete', 'marker', 'room', 'text', 'trk'].includes(planTool)) {
                 planTap = { id: e.pointerId, px, py, ox: planView.offsetX, oy: planView.offsetY, moved: false, tool: planTool, w };
                 return;
             }
@@ -3855,6 +3857,7 @@ textarea.gv-in{min-height:80px;padding:12px}
                     const world = toWorld(t.px, t.py);
                     if (t.tool === 'trk') trkTap(world.x, world.y);
                     else if (t.tool === 'marker') addMarkerAt(world.x, world.y);
+                    else if (t.tool === 'room') addRoomMarkerAt(world.x, world.y);
                     else if (t.tool === 'delete') {
                         const hitId = hitTestAnnotation(world.x, world.y);
                         if (hitId) { deleteAnnotation(hitId); showToast('Élément supprimé'); }
@@ -3877,6 +3880,54 @@ textarea.gv-in{min-height:80px;padding:12px}
             }
         }
 
+        function chooseRoomForPlanMarker(rooms) {
+            return new Promise(resolve => {
+                const bd = document.createElement('div'); bd.className = 'ui-bd';
+                const sh = document.createElement('div'); sh.className = 'ui-sheet'; sh.setAttribute('role', 'dialog'); sh.setAttribute('aria-modal', 'true');
+                const title = document.createElement('div'); title.className = 'ui-title'; title.textContent = 'Identifier un local sur le plan';
+                const msg = document.createElement('div'); msg.className = 'ui-msg'; msg.textContent = 'Choisissez le local, puis touchez son emplacement sur le plan.';
+                const select = document.createElement('select'); select.className = 'ui-in'; select.style.width = '100%';
+                rooms.forEach(room => { const opt = document.createElement('option'); opt.value = room.id; opt.textContent = room.path; select.appendChild(opt); });
+                const btns = document.createElement('div'); btns.className = 'ui-btns';
+                const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'ui-btn ui-cancel'; cancel.textContent = 'Annuler';
+                const ok = document.createElement('button'); ok.type = 'button'; ok.className = 'ui-btn ui-ok'; ok.textContent = 'Choisir';
+                let done = false;
+                const finish = value => { if (done) return; done = true; document.removeEventListener('keydown', onKey, true); bd.classList.remove('open'); setTimeout(() => bd.remove(), 200); resolve(value); };
+                const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); finish(null); } };
+                cancel.onclick = () => finish(null); ok.onclick = () => finish(select.value || null);
+                bd.addEventListener('click', e => { if (e.target === bd) finish(null); });
+                document.addEventListener('keydown', onKey, true); btns.append(cancel, ok); sh.append(title, msg, select, btns); bd.appendChild(sh); document.body.appendChild(bd);
+                requestAnimationFrame(() => bd.classList.add('open')); setTimeout(() => select.focus({ preventScroll: true }), 100);
+            });
+        }
+        async function startRoomMarker() {
+            const plan = plansData[currentPlanIndex];
+            if (!plan) { showToast("Importez d'abord un plan.", 'error'); return; }
+            const rooms = [];
+            const walk = (node, path) => {
+                if (!node) return;
+                const nextPath = node.id === 'root' ? path : path.concat(node.label || 'Sans nom');
+                const children = node.children || [];
+                if (node.id !== 'root' && node.type !== 'batiment' && children.length === 0) rooms.push({ id: node.id, path: nextPath.join(' › ') });
+                children.forEach(child => walk(child, nextPath));
+            };
+            walk(structureTree || defaultTree(), []);
+            if (!rooms.length) { showToast("Créez d'abord les niveaux et les locaux dans l'étape 3.", 'error'); return; }
+            const selectedId = await chooseRoomForPlanMarker(rooms);
+            if (!selectedId) return;
+            pendingRoomMarkerId = selectedId; setPlanTool('room');
+            showToast('Touchez le plan à l’emplacement de « ' + ((findNode(selectedId) || {}).label || 'ce local') + ' ».');
+        }
+        function addRoomMarkerAt(x, y) {
+            const plan = plansData[currentPlanIndex];
+            const node = pendingRoomMarkerId && findNode(pendingRoomMarkerId);
+            if (!plan || !node) { pendingRoomMarkerId = null; setPlanTool('pan'); showToast("Le local sélectionné n'existe plus. Recommencez.", 'error'); return; }
+            const num = plan.annotations.filter(a => a.type === 'marker').length + 1;
+            plan.annotations.push({ id: 'a' + Date.now(), type: 'marker', markerKind: 'room', color: '#3553CF', x, y, num, link: 'Local : ' + node.label, nodeId: node.id, roomLabel: node.label });
+            logAction('marqueur_local_plan', node.id, plan.name + ' — ' + node.label);
+            pendingRoomMarkerId = null; setPlanTool('pan'); saveDataDebounced(true); redrawPlan(); renderAnnotationList();
+            showToast('Repère ajouté pour « ' + node.label + ' ».');
+        }
         function addMarkerAt(x, y) {
             const plan = plansData[currentPlanIndex];
             if (!plan) return;
@@ -4250,6 +4301,13 @@ textarea.gv-in{min-height:80px;padding:12px}
                 ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                 ctx.fillText(a.num, a.x, a.y);
                 ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+                if (a.markerKind === 'room' && a.roomLabel) {
+                    const label = a.roomLabel.length > 28 ? a.roomLabel.slice(0, 27) + '…' : a.roomLabel;
+                    ctx.font = `bold ${12 / scale}px Segoe UI`;
+                    const tw = ctx.measureText(label).width, pad = 5 / scale, lh = 20 / scale;
+                    ctx.fillStyle = 'rgba(25, 45, 95, .92)'; ctx.fillRect(a.x + 18 / scale, a.y - lh / 2, tw + pad * 2, lh);
+                    ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(label, a.x + 18 / scale + pad, a.y); ctx.textBaseline = 'alphabetic';
+                }
                 // Petit repère si des photos sont liées à l'observation de ce marqueur.
                 const linkedPhotoCount = (a.nodeId && a.critName && nodeData[a.nodeId] && nodeData[a.nodeId].critPhotos)
                     ? (nodeData[a.nodeId].critPhotos[a.critName] || []).length : 0;
@@ -4550,6 +4608,11 @@ textarea.gv-in{min-height:80px;padding:12px}
                 return;
             }
             container.innerHTML = markers.map(a => {
+                if (a.markerKind === 'room' || (a.nodeId && !a.critName && a.roomLabel)) {
+                    const room = a.nodeId && findNode(a.nodeId);
+                    const roomName = room ? room.label : (a.roomLabel || 'Local supprimé');
+                    return `<div class="plan-annot-row" style="flex-wrap:wrap;"><span class="plan-annot-badge" style="background:${a.color || '#3553CF'}">${a.num}</span><strong style="min-width:90px;">🚪 ${escapeHtml(roomName)}</strong><small style="color:var(--text-muted);">Repère de local</small><button type="button" class="btn" style="padding:6px 10px; background:var(--danger-color); color:var(--surface); flex:none;" onclick="deleteAnnotation('${a.id}')">&#128465;</button></div>`;
+                }
                 const structKey = a.nodeId && a.critName ? a.nodeId + '::' + a.critName : '';
                 const isManual = !!a.link && !structKey;
                 const options = obs.map(o => {
